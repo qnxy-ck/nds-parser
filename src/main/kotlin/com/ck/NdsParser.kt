@@ -1,14 +1,13 @@
 package com.ck
 
-import com.ck.ast.ASTree
-import com.ck.ast.ImportStatement
-import com.ck.ast.NamespaceStatement
-import com.ck.ast.Program
-import com.ck.token.NamespaceIdentifierToken
+import com.ck.ast.*
+import com.ck.token.IdentifierToken
 import com.ck.token.Token
 import com.ck.token.keyword.EntityToken
 import com.ck.token.keyword.ImportToken
 import com.ck.token.keyword.NamespaceToken
+import com.ck.token.keyword.SearchToken
+import com.ck.token.symbol.*
 import kotlin.reflect.KClass
 
 /**
@@ -33,14 +32,25 @@ class NdsParser(
     private fun program() = Program(this.statementList())
 
     private fun statementList(): List<ASTree> {
-        val statementList = mutableListOf<ASTree>(this.namespaceStatement())
+        val statementList = mutableListOf<ASTree>()
+        statementList.add(this.namespaceStatement())
         statementList.add(this.importEntityStatement())
 
-        this.optImportStatementList().let {
-            if (it.isNotEmpty()) statementList.addAll(it)
-        }
+        this.optImportStatementList().let { if (it.isNotEmpty()) statementList.addAll(it) }
+
+        statementList.add(this.statement())
 
         return statementList
+    }
+
+    /**
+     * NamespaceStatement
+     *  : 'namespace' NamespaceIdentifier -> namespace com.ck.test
+     *  ;
+     */
+    private fun namespaceStatement(): NamespaceStatement {
+        this.consume(NamespaceToken::class)
+        return NamespaceStatement(this.namespaceIdentifier(false))
     }
 
     /**
@@ -77,27 +87,211 @@ class NdsParser(
         }
         return importStatementList
     }
-    
+
     private fun importStatement(entity: Boolean = false): ImportStatement {
         this.consume(ImportToken::class)
         if (entity) this.consume(EntityToken::class)
 
-        val token = this.consume(NamespaceIdentifierToken::class)
-        return ImportStatement(token.value, entity)
+        return ImportStatement(
+            this.namespaceIdentifier(),
+            entity
+        )
+    }
+
+    /**
+     * Statement
+     *  : SearchFunDeclaration
+     *  ;
+     */
+    private fun statement(): ASTree {
+        return when (this.lookahead) {
+            is SearchToken -> this.searchFunDeclaration()
+            else -> EmptyStatement
+        }
+
+    }
+
+    /**
+     * SearchFunDeclaration
+     *  : 'search' Identifier '(' OptParameterList ')' OptSearchReturnDeclaration SearchFunBlockStatement
+     *  ;
+     */
+    private fun searchFunDeclaration(): ASTree {
+        this.consume(SearchToken::class)
+        // Identifier
+        val funName = this.consume(IdentifierToken::class)
+
+        this.consume(OpenParenthesisToken::class)
+        // OptParameterList
+        val parameterList = if (this.test(ClosedParenthesisToken::class)) emptyList() else this.parameterList()
+        this.consume(ClosedParenthesisToken::class)
+
+        // OptSearchReturnDeclaration
+        val returnInfo = if (this.test(OpenCurlyBracketToken::class)) SearchReturnDeclaration.DEFAULT else this.returnDeclaration()
+
+        val body = this.searchFunBlockStatement()
+        return SearchFunDeclaration(
+            funName.value,
+            parameterList,
+            returnInfo,
+            body
+        )
+    }
+
+    /**
+     * ParameterList
+     *  : Parameter
+     *  | ParameterList ',' Parameter
+     *  ;
+     */
+    private fun parameterList(): List<Parameter> {
+        val parameterList = mutableListOf<Parameter>()
+        parameterList.add(this.parameter())
+
+        while (this.test(CommaToken::class)) {
+            this.consume(CommaToken::class)
+            parameterList.add(this.parameter())
+        }
+
+        return parameterList
+    }
+
+    /**
+     * Parameter
+     *  : Identifier ':' Identifier
+     *  ;
+     */
+    private fun parameter(): Parameter {
+        val varName = this.consume(IdentifierToken::class)
+        this.consume(ColonToken::class)
+        val varType = this.consume(IdentifierToken::class)
+
+        return Parameter(
+            varName.value,
+            varType.value
+        )
+    }
+
+    /**
+     * ReturnDeclaration
+     *  : ':' NamespaceIdentifier
+     *  ;
+     */
+    private fun returnDeclaration(): SearchReturnDeclaration {
+        this.consume(ColonToken::class)
+        val returnType = this.namespaceIdentifier()
+
+        return SearchReturnDeclaration(returnType)
+    }
+
+    /**
+     * SearchFunBlockStatement
+     *  : '{' SearchFunStatementList '}'
+     *  ;
+     */
+    private fun searchFunBlockStatement(): ASTree {
+        this.consume(OpenCurlyBracketToken::class)
+        val body = this.searchFunStatementList()
+        this.consume(ClosedCurlyBracketToken::class)
+
+        return SearchFunBlockStatement(body)
+    }
+
+    /**
+     * SearchFunStatementList
+     *  : SearchStatement
+     *  | SearchFunStatementList SearchStatement
+     *  ;
+     */
+    private fun searchFunStatementList(): List<ASTree> {
+        val list = mutableListOf<ASTree>()
+
+        val sqlLiteralList = mutableListOf<SqlLiteral>()
+
+        while (!this.test(ClosedCurlyBracketToken::class)) {
+            val searchStatement = this.searchStatement()
+
+            if (searchStatement is SqlLiteral) {
+                sqlLiteralList.add(searchStatement)
+            } else {
+                if (sqlLiteralList.isNotEmpty()) {
+                    val compressedSql = sqlLiteralList.joinToString(" ") { it.value }
+                    sqlLiteralList.clear()
+                    list.add(SqlLiteral(compressedSql))
+                }
+                list.add(searchStatement)
+            }
+        }
+
+        return list
+    }
+
+    /**
+     * SearchStatement
+     *  : SqlLiteral
+     *  | MemberExpression
+     *  ;
+     */
+    private fun searchStatement(): ASTree {
+        return when (this.lookahead) {
+            is ColonToken -> this.memberExpression()
+            else -> this.sqlLiteral()
+        }
+    }
+
+    /**
+     * MemberExpression
+     *  : ':' Identifier
+     *  ;
+     */
+    private fun memberExpression(): ASTree {
+        this.consume(ColonToken::class)
+        val root = this.consume(IdentifierToken::class)
+
+        // TODO: 变量属性待完善 
+        return MemberExpression(root.value, null)
+    }
+
+    private fun sqlLiteral(): ASTree {
+        val token = when (this.lookahead) {
+            is IdentifierToken -> this.consume(IdentifierToken::class)
+            is StartToken -> this.consume(StartToken::class)
+            is SimpleAssignToken -> this.consume(SimpleAssignToken::class)
+            is OpenParenthesisToken -> this.consume(OpenParenthesisToken::class)
+            is ClosedParenthesisToken -> this.consume(ClosedParenthesisToken::class)
+            is CommaToken -> this.consume(CommaToken::class)
+            else -> throw SyntaxException("未知类型: ${this.lookahead}")
+        }
+
+        return SqlLiteral(token.value)
     }
 
 
     /**
-     * NamespaceStatement
-     *  : 'namespace' NAMESPACE_IDENTIFIER -> namespace com.ck.test
-     *  ;
+     * 命名空间标识符
+     *
+     * @param start 是否可以匹配最后的星号 默认true
+     * @return 包名称
      */
-    private fun namespaceStatement(): NamespaceStatement {
-        this.consume(NamespaceToken::class)
-        val token = this.consume(NamespaceIdentifierToken::class)
-        return NamespaceStatement(token.value)
-    }
+    fun namespaceIdentifier(start: Boolean = true): String {
+        // 至少存在一个
+        val namespaceList = StringBuilder(this.consume(IdentifierToken::class).value)
 
+        while (this.test(DotToken::class)) {
+            namespaceList.append(this.consume(DotToken::class).value)
+
+            if (this.test(IdentifierToken::class)) {
+                namespaceList.append(this.consume(IdentifierToken::class).value)
+            } else if (start && this.test(StartToken::class)) {
+                namespaceList.append(this.consume(StartToken::class).value)
+
+                // 最后的星号如果匹配成功, 那么则需要结束匹配
+                break
+            }
+        }
+
+        return namespaceList.toString()
+    }
 
     private fun <T : Token<*>> test(tokenType: KClass<T>) = tokenType.isInstance(this.lookahead)
 
@@ -106,7 +300,7 @@ class NdsParser(
             ?: throw SyntaxException("Unexpected end of input, expected: ${tokenType.simpleName}")
 
         if (!tokenType.isInstance(token)) {
-            throw SyntaxException("Unexpected token: ${token.value}, expected: ${tokenType.simpleName}")
+            throw SyntaxException("Unexpected token: [${token.value}] -> ${token.javaClass.simpleName}, expected: ${tokenType.simpleName}")
         }
 
         this.lookahead = this.ndsTokenizer.getNextToken()
@@ -115,4 +309,11 @@ class NdsParser(
         return token as T
     }
 
+}
+
+
+fun main() {
+    NdsParser("com.ck.*").apply {
+        println(namespaceIdentifier())
+    }
 }

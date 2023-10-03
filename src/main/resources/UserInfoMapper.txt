@@ -11,5 +11,7 @@ import entity com.demo.data.entity.UserInfo
 import java.util.List
 import java.util.ArrayList
 
- 
+search selectById(id: Int, name: String) : UserInfo {
+     select * from user_info where id = :id and name = :name
+ }
 

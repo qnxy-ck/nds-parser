@@ -1,10 +1,12 @@
 package com.ck
 
-import com.ck.token.NamespaceIdentifierToken
+import com.ck.token.IdentifierToken
 import com.ck.token.Token
 import com.ck.token.keyword.EntityToken
 import com.ck.token.keyword.ImportToken
 import com.ck.token.keyword.NamespaceToken
+import com.ck.token.keyword.SearchToken
+import com.ck.token.symbol.*
 
 /**
  * @author 陈坤
@@ -28,21 +30,38 @@ class NdsTokenizer {
 
             // --------------------------------------------------------------
             // 关键字
-            "^\\bnamespace\\b".toRegex() to { NamespaceToken },
-            "^\\bimport\\b".toRegex() to { ImportToken },
-            "^\\bentity\\b".toRegex() to { EntityToken },
+            "^\\bnamespace \\b".toRegex() to { NamespaceToken },
+            "^\\bimport \\b".toRegex() to { ImportToken },
+            "^\\bentity \\b".toRegex() to { EntityToken },
+            "^\\bsearch \\b".toRegex() to { SearchToken },
+
+            // --------------------------------------------------------------
+            // 标识符
+            "^\\w+".toRegex() to { IdentifierToken(it) },
 
 
             // --------------------------------------------------------------
-            // Identifier
-            "[a-zA-Z]+[0-9a-zA-Z_]*(\\.[a-zA-Z]+[0-9a-zA-Z_]*)*".toRegex() to { NamespaceIdentifierToken(it) }
-        )
+            // 符号
+            "^\\(".toRegex() to { OpenParenthesisToken },
+            "^\\)".toRegex() to { ClosedParenthesisToken },
+            "^,".toRegex() to { CommaToken },
+            "^:".toRegex() to { ColonToken },
+            "^\\{".toRegex() to { OpenCurlyBracketToken },
+            "^}".toRegex() to { ClosedCurlyBracketToken },
+            "^\\.".toRegex() to { DotToken },
+            "^\\*".toRegex() to { StartToken },
+            "^#".toRegex() to { PoundSignToken },
+
+            "^=".toRegex() to { SimpleAssignToken },
+
+
+            )
     }
 
 
     private lateinit var text: String
 
-    private var textInit = false;
+    private var textInit = false
     private var cursor = 0
 
     fun init(text: String) {
@@ -72,4 +91,17 @@ class NdsTokenizer {
     }
 
 
+}
+
+fun main() {
+    NdsTokenizer().apply {
+        init("user_info")
+
+        var token = getNextToken()
+        while (token != null) {
+            println(token)
+
+            token = getNextToken()
+        }
+    }
 }

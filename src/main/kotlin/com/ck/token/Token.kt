@@ -11,4 +11,5 @@ interface Token<T> {
     @get:JsonValue
     val value: T
 
+
 }
