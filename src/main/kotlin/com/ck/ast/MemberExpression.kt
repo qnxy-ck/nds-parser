@@ -5,6 +5,6 @@ package com.ck.ast
  * 2023/10/3
  */
 data class MemberExpression(
-    val variableName: String,
+    val obj: ASTree,
     val property: ASTree?
 ) : ASTree

@@ -6,7 +6,7 @@ package com.ck.ast
  */
 data class SearchFunDeclaration(
     val funName: String,
-    val parameters: List<Parameter>,
+    val parameters: List<Argument>,
     val returnInfo: SearchReturnDeclaration?,
     val body: SearchFunBlockStatement
 ) : ASTree
