@@ -5,10 +5,14 @@ package com.ck.ast
  * 2023/10/3
  */
 data class SearchReturnDeclaration(
-    val returnType: String
+    // 是否为多个返回值 
+    val multiple: Boolean,
+    val returnType: String?
 ) : ASTree {
 
     companion object {
-        val DEFAULT = SearchReturnDeclaration("")
+        val DEFAULT = SearchReturnDeclaration(false, null)
+        val MUL_DEFAULT = SearchReturnDeclaration(true, null)
+        
     }
 }

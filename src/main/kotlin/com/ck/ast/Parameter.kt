@@ -5,6 +5,6 @@ package com.ck.ast
  * 2023/10/3
  */
 data class Parameter(
-    val varName: String,
-    val varType: String
+    val parameterName: String,
+    val parameterType: ParameterType
 ) : ASTree

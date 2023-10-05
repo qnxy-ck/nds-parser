@@ -3,10 +3,7 @@ package com.ck
 import com.ck.ast.*
 import com.ck.token.IdentifierToken
 import com.ck.token.Token
-import com.ck.token.keyword.EntityToken
-import com.ck.token.keyword.ImportToken
-import com.ck.token.keyword.NamespaceToken
-import com.ck.token.keyword.SearchToken
+import com.ck.token.keyword.*
 import com.ck.token.symbol.*
 import kotlin.reflect.KClass
 
@@ -22,7 +19,7 @@ class NdsParser(
     private var lookahead: Token<*>? = null
 
 
-    fun parse(): ASTree {
+    fun parse(): Program {
         this.ndsTokenizer.init(this.text)
         this.lookahead = this.ndsTokenizer.getNextToken()
 
@@ -38,7 +35,7 @@ class NdsParser(
 
         this.optImportStatementList().let { if (it.isNotEmpty()) statementList.addAll(it) }
 
-        statementList.add(this.statement())
+        statementList.addAll(this.funStatementList())
 
         return statementList
     }
@@ -99,16 +96,30 @@ class NdsParser(
     }
 
     /**
-     * Statement
+     * FunStatementList
+     *  : FunStatement
+     *  | FunStatement FunStatementList
+     *  ;
+     */
+    private fun funStatementList(): List<ASTree> {
+        val funStatementList = mutableListOf<ASTree>()
+        while (this.lookahead != null) {
+            funStatementList.add(this.funStatement())
+        }
+
+        return funStatementList
+    }
+
+    /**
+     * FunStatement
      *  : SearchFunDeclaration
      *  ;
      */
-    private fun statement(): ASTree {
+    private fun funStatement(): ASTree {
         return when (this.lookahead) {
             is SearchToken -> this.searchFunDeclaration()
             else -> EmptyStatement
         }
-
     }
 
     /**
@@ -127,7 +138,7 @@ class NdsParser(
         this.consume(ClosedParenthesisToken::class)
 
         // OptSearchReturnDeclaration
-        val returnInfo = if (this.test(OpenCurlyBracketToken::class)) SearchReturnDeclaration.DEFAULT else this.returnDeclaration()
+        val returnInfo = this.optSearchReturnDeclaration()
 
         val body = this.searchFunBlockStatement()
         return SearchFunDeclaration(
@@ -158,38 +169,80 @@ class NdsParser(
 
     /**
      * Parameter
-     *  : Identifier ':' Identifier
+     *  : Identifier ':' ParameterType
      *  ;
      */
     private fun parameter(): Parameter {
-        val varName = this.consume(IdentifierToken::class)
+        val parameterName = this.consume(IdentifierToken::class)
         this.consume(ColonToken::class)
-        val varType = this.consume(IdentifierToken::class)
+        val parameterType = this.parameterType()
 
         return Parameter(
-            varName.value,
-            varType.value
+            parameterName.value,
+            parameterType,
         )
     }
 
     /**
-     * ReturnDeclaration
-     *  : ':' NamespaceIdentifier
+     * ParameterType
+     *  : NamespaceIdentifier
+     *  | 'mul' NamespaceIdentifier
      *  ;
      */
-    private fun returnDeclaration(): SearchReturnDeclaration {
-        this.consume(ColonToken::class)
-        val returnType = this.namespaceIdentifier()
+    private fun parameterType(): ParameterType {
+        var isMul = false
+        if (this.test(MulToken::class)) {
+            this.consume(MulToken::class)
+            isMul = true
+        }
 
-        return SearchReturnDeclaration(returnType)
+        val token = this.consume(IdentifierToken::class)
+        return ParameterType(isMul, token.value)
     }
+
+    /**
+     * ReturnDeclaration
+     *  : ':' SearchReturnDeclaration
+     *  ;
+     */
+    private fun optSearchReturnDeclaration(): SearchReturnDeclaration {
+        if (this.test(OpenCurlyBracketToken::class)) {
+            // 如果是花括号开始, 直接返回
+            return SearchReturnDeclaration.DEFAULT
+        }
+
+        this.consume(ColonToken::class)
+        return this.searchReturnDeclaration()
+    }
+
+    /**
+     * SearchReturnDeclaration
+     *  : mul
+     *  | mul NamespaceIdentifier
+     *  ;
+     */
+    private fun searchReturnDeclaration(): SearchReturnDeclaration {
+        return if (this.test(MulToken::class)) {
+            this.consume(MulToken::class)
+            if (this.test(OpenCurlyBracketToken::class)) {
+                SearchReturnDeclaration.MUL_DEFAULT
+            } else {
+                val value = this.namespaceIdentifier()
+                SearchReturnDeclaration(true, value)
+            }
+        } else {
+            val returnType = this.namespaceIdentifier()
+            SearchReturnDeclaration(false, returnType)
+        }
+    }
+
 
     /**
      * SearchFunBlockStatement
      *  : '{' SearchFunStatementList '}'
      *  ;
      */
-    private fun searchFunBlockStatement(): ASTree {
+    private fun searchFunBlockStatement(): SearchFunBlockStatement {
         this.consume(OpenCurlyBracketToken::class)
         val body = this.searchFunStatementList()
         this.consume(ClosedCurlyBracketToken::class)
@@ -273,7 +326,7 @@ class NdsParser(
      * @param start 是否可以匹配最后的星号 默认true
      * @return 包名称
      */
-    fun namespaceIdentifier(start: Boolean = true): String {
+    private fun namespaceIdentifier(start: Boolean = true): String {
         // 至少存在一个
         val namespaceList = StringBuilder(this.consume(IdentifierToken::class).value)
 
@@ -309,11 +362,4 @@ class NdsParser(
         return token as T
     }
 
-}
-
-
-fun main() {
-    NdsParser("com.ck.*").apply {
-        println(namespaceIdentifier())
-    }
 }

@@ -8,5 +8,5 @@ data class SearchFunDeclaration(
     val funName: String,
     val parameters: List<Parameter>,
     val returnInfo: SearchReturnDeclaration?,
-    val body: ASTree?
+    val body: SearchFunBlockStatement
 ) : ASTree

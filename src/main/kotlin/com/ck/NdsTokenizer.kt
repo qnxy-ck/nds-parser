@@ -2,10 +2,7 @@ package com.ck
 
 import com.ck.token.IdentifierToken
 import com.ck.token.Token
-import com.ck.token.keyword.EntityToken
-import com.ck.token.keyword.ImportToken
-import com.ck.token.keyword.NamespaceToken
-import com.ck.token.keyword.SearchToken
+import com.ck.token.keyword.*
 import com.ck.token.symbol.*
 
 /**
@@ -34,6 +31,7 @@ class NdsTokenizer {
             "^\\bimport \\b".toRegex() to { ImportToken },
             "^\\bentity \\b".toRegex() to { EntityToken },
             "^\\bsearch \\b".toRegex() to { SearchToken },
+            "^\\bmul \\b".toRegex() to { MulToken },
 
             // --------------------------------------------------------------
             // 标识符
