@@ -28,6 +28,15 @@ class NdsParser(
 
     private fun program() = Program(this.statementList())
 
+    /**
+     * statementList
+     *  : NamespaceStatement
+     *  | ImportEntityStatement
+     *  | OptImportStatementList
+     *  | FunStatementList
+     *  ;
+     *
+     */
     private fun statementList(): List<ASTree> {
         val statementList = mutableListOf<ASTree>()
         statementList.add(this.namespaceStatement())
@@ -124,15 +133,15 @@ class NdsParser(
 
     /**
      * SearchFunDeclaration
-     *  : 'search' Identifier Arguments OptSearchReturnDeclaration SearchFunBlockStatement
+     *  : 'search' Identifier FormalParameters OptSearchReturnDeclaration SearchFunBlockStatement
      *  ;
      */
     private fun searchFunDeclaration(): ASTree {
         this.consume(SearchToken::class)
         // Identifier
         val funName = this.identifier()
-        // Arguments
-        val parameterList = this.arguments()
+        // FormalParameters
+        val parameterList = this.formalParameters()
 
         // OptSearchReturnDeclaration
         val returnInfo = this.optSearchReturnDeclaration()
@@ -147,68 +156,54 @@ class NdsParser(
     }
 
     /**
-     * Arguments
-     *  : '(' OptArgumentList ')'
+     * FormalParameters
+     *  : '(' OptFormalParameterList ')'
      *  ;
      */
-    private fun arguments(): List<Argument> {
+    private fun formalParameters(): List<FormalParameter> {
         this.consume(OpenParenthesisToken::class)
 
-        // OptArgumentList
-        val argumentList = if (this.test(ClosedParenthesisToken::class)) emptyList() else this.argumentList()
+        // OptFormalParameterList
+        val formalParameterList = if (this.test(ClosedParenthesisToken::class)) emptyList() else this.formalParameterList()
 
         this.consume(ClosedParenthesisToken::class)
-        return argumentList
+        return formalParameterList
     }
 
     /**
-     * ArgumentList
-     *  : Argument
-     *  | ArgumentList ',' Argument
+     * FormalParameterList
+     *  : FormalParameter
+     *  | FormalParameterList ',' FormalParameter
      *  ;
      */
-    private fun argumentList(): List<Argument> {
-        val argumentList = mutableListOf(this.argument())
+    private fun formalParameterList(): List<FormalParameter> {
+        val formalParameterList = mutableListOf(this.formalParameter())
 
-        while (this.test(CommaToken::class)) {
-            this.consume(CommaToken::class)
-            argumentList.add(this.argument())
+        while (this.matchAndConsume(ColonToken::class) != null) {
+            formalParameterList.add(this.formalParameter())
         }
-        return argumentList
+        return formalParameterList
     }
 
 
     /**
-     * Argument
-     *  : Identifier ':' ParameterType
+     * FormalParameter
+     *  : Identifier ':' NamespaceIdentifier
+     *  | Identifier ':' 'mul' NamespaceIdentifier
      *  ;
      */
-    private fun argument(): Argument {
+    private fun formalParameter(): FormalParameter {
         val parameterName = this.identifier()
         this.consume(ColonToken::class)
-        val parameterType = this.parameterType()
 
-        return Argument(
+        val isMul = this.matchAndConsume(MulToken::class) != null
+
+        val type = this.namespaceIdentifier(false)
+        return FormalParameter(
             parameterName.value,
-            parameterType,
+            isMul,
+            type,
         )
-    }
-
-    /**
-     * ParameterType
-     *  : NamespaceIdentifier
-     *  | 'mul' NamespaceIdentifier
-     *  ;
-     */
-    private fun parameterType(): ParameterType {
-        var isMul = false
-        if (this.test(MulToken::class)) {
-            this.consume(MulToken::class)
-            isMul = true
-        }
-
-        val token = this.identifier()
-        return ParameterType(isMul, token.value)
     }
 
     /**
@@ -233,8 +228,7 @@ class NdsParser(
      *  ;
      */
     private fun searchReturnDeclaration(): SearchReturnDeclaration {
-        return if (this.test(MulToken::class)) {
-            this.consume(MulToken::class)
+        return if (this.matchAndConsume(MulToken::class) != null) {
             if (this.test(OpenCurlyBracketToken::class)) {
                 SearchReturnDeclaration.MUL_DEFAULT
             } else {
@@ -297,9 +291,24 @@ class NdsParser(
      */
     private fun searchStatement(): ASTree {
         return when (this.lookahead) {
-            is ColonToken -> this.members()
+            is ColonToken -> this.callMemberExpression()
             else -> this.sqlLiteral()
         }
+    }
+
+    /**
+     * CallMemberExpression
+     *  : Members
+     *  | Members CallExpression
+     *  ;
+     */
+    private fun callMemberExpression(): ASTree {
+        val members = this.members()
+        if (!this.test(DoubleColonToken::class)) {
+            return members
+        }
+
+        return this.callExpression(members)
     }
 
     /**
@@ -307,9 +316,8 @@ class NdsParser(
      *  : ':' MemberExpression
      *  ;
      */
-    private fun members(): ASTree {
+    private fun members(): MemberExpression {
         this.consume(ColonToken::class)
-
         return this.memberExpression()
     }
 
@@ -319,16 +327,85 @@ class NdsParser(
      *  | MemberExpression '.' Identifier
      *  ;
      */
-    private fun memberExpression(): ASTree {
+    private fun memberExpression(): MemberExpression {
         var member: ASTree = this.identifier()
 
-        while (this.test(DotToken::class)) {
-            this.consume(DotToken::class)
+        var existProperty = false
+        while (this.matchAndConsume(DotToken::class) != null) {
             val property = this.identifier()
             member = MemberExpression(member, property)
+            existProperty = true
         }
 
-        return member
+        if (existProperty) {
+            return member as MemberExpression
+        }
+
+        return MemberExpression(member, null)
+    }
+
+    /**
+     * CallExpression
+     *  : '::' Identifier OptArguments
+     *  ;
+     */
+    private fun callExpression(callee: MemberExpression): CallExpression {
+        this.consume(DoubleColonToken::class)
+        val funName = this.identifier().value
+
+        return CallExpression(
+            callee,
+            funName,
+            this.optArguments()
+        )
+    }
+
+    /**
+     * OptArguments
+     *  : '(' OptArgumentList ')'
+     *  ;
+     */
+    private fun optArguments(): List<ASTree> {
+        if (this.test(OpenParenthesisToken::class)) {
+
+            this.consume(OpenParenthesisToken::class)
+            // OptArgumentList
+            val optArgumentList = if (this.test(ClosedParenthesisToken::class)) emptyList() else this.argumentList()
+            this.consume(ClosedParenthesisToken::class)
+
+            return optArgumentList
+        }
+
+        return emptyList()
+    }
+
+    /**
+     * ArgumentList
+     *  : Argument
+     *  | ArgumentList ',' Argument
+     *  ;
+     */
+    private fun argumentList(): List<ASTree> {
+        val argumentList = mutableListOf<ASTree>()
+        argumentList.add(this.argument())
+
+        while (this.matchAndConsume(CommaToken::class) != null) {
+            argumentList.add(this.argument())
+        }
+
+        return argumentList
+    }
+
+    /**
+     * Argument
+     *  : Identifier
+     *  ;
+     */
+    private fun argument(): ASTree {
+        return when (this.lookahead) {
+            is IdentifierToken -> this.identifier()
+            else -> throw SyntaxException("未知的参数类型(Argument) -> ${this.lookahead?.javaClass?.simpleName}")
+        }
     }
 
     private fun sqlLiteral(): ASTree {
@@ -339,7 +416,7 @@ class NdsParser(
             is OpenParenthesisToken -> this.consume(OpenParenthesisToken::class)
             is ClosedParenthesisToken -> this.consume(ClosedParenthesisToken::class)
             is CommaToken -> this.consume(CommaToken::class)
-            else -> throw SyntaxException("未知类型: ${this.lookahead}")
+            else -> throw SyntaxException("未知sql类型: ${this.lookahead?.javaClass?.simpleName}")
         }
 
         return SqlLiteral(token.value)
@@ -375,6 +452,19 @@ class NdsParser(
     private fun identifier(): Identifier {
         val token = this.consume(IdentifierToken::class)
         return Identifier(token.value)
+    }
+
+    private fun <T : Token<*>> matchAndConsume(tokenType: KClass<T>): T? {
+        val token = this.lookahead
+
+        return if (tokenType.isInstance(token)) {
+            this.lookahead = this.ndsTokenizer.getNextToken()
+
+            @Suppress("UNCHECKED_CAST")
+            token as T?
+        } else {
+            null
+        }
     }
 
     private fun <T : Token<*>> test(tokenType: KClass<T>) = tokenType.isInstance(this.lookahead)

@@ -43,6 +43,7 @@ class NdsTokenizer {
             "^\\(".toRegex() to { OpenParenthesisToken },
             "^\\)".toRegex() to { ClosedParenthesisToken },
             "^,".toRegex() to { CommaToken },
+            "^::".toRegex() to { DoubleColonToken },
             "^:".toRegex() to { ColonToken },
             "^\\{".toRegex() to { OpenCurlyBracketToken },
             "^}".toRegex() to { ClosedCurlyBracketToken },

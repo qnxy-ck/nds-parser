@@ -5,12 +5,10 @@ import entity com.demo.data.entity.UserInfo
 import java.util.List
 import java.util.ArrayList
 
-search selectById(userInfo: UserInfo): UserInfo {
-     select * from user_info where id = :userInfo.info.id
-}
-
-search selectByNames(nameList: mul String): mul UserInfo {
-     select * from user_info where name in :nameList
+search selectById(id: Int): UserInfo {
+     :id::test
+     :id::test()
+     :id::test(x, y)
 }
 
 
