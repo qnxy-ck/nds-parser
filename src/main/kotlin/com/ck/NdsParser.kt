@@ -408,6 +408,17 @@ class NdsParser(
         }
     }
 
+    /**
+     * SqlLiteral
+     *  : IDENTIFIER
+     *  | '*'
+     *  | '='
+     *  | '('
+     *  | ')'
+     *  | ','
+     *  ;
+     *
+     */
     private fun sqlLiteral(): ASTree {
         val token = when (this.lookahead) {
             is IdentifierToken -> this.consume(IdentifierToken::class)
