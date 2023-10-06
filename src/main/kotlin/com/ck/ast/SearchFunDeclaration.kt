@@ -26,5 +26,5 @@ data class SearchFunDeclaration(
     /**
      * 函数体
      */
-    val body: SearchFunBlockStatement
+    val blockStatement: SearchFunBlockStatement
 ) : ASTree

@@ -15,8 +15,15 @@ class NdsTokenizer {
         private val REGEXP_INFO_ARR = arrayOf<Pair<Regex, (String) -> Token<*>?>>(
 
             // --------------------------------------------------------------
+            // 匹配换行
+//            "\\n".toRegex() to { NewLineToken },
+//            "\\r\\n".toRegex() to { NewLineToken },
+
+
+            // --------------------------------------------------------------
             // 跳过空白符
             """^\s+""".toRegex() to { null },
+//            """[ \t]+""".toRegex() to { null },
 
             // 跳过单行注释
             "^//.*".toRegex() to { null },
@@ -44,6 +51,7 @@ class NdsTokenizer {
             "^\\)".toRegex() to { ClosedParenthesisToken },
             "^,".toRegex() to { CommaToken },
             "^::".toRegex() to { DoubleColonToken },
+            "^\\?\\.".toRegex() to { QuestionMarkPointToken },
             "^:".toRegex() to { ColonToken },
             "^\\{".toRegex() to { OpenCurlyBracketToken },
             "^}".toRegex() to { ClosedCurlyBracketToken },
@@ -63,6 +71,9 @@ class NdsTokenizer {
     private var textInit = false
     private var cursor = 0
 
+    private var lineNum = 1
+    private var columnNum = 1
+
     fun init(text: String) {
         this.text = text
         this.textInit = true
@@ -75,32 +86,33 @@ class NdsTokenizer {
         return this.cursor < this.text.length
     }
 
+
     fun getNextToken(): Token<*>? {
         if (!hasMoreTokens()) return null
 
         val input = this.text.substring(this.cursor)
+
         for ((regexp, tokenBuilder) in REGEXP_INFO_ARR) {
             val tokenValue = regexp.matchAt(input, 0)?.value ?: continue
-
             this.cursor += tokenValue.length
-            return tokenBuilder(tokenValue) ?: this.getNextToken()
+
+            this.columnNum += tokenValue.length
+            val token = tokenBuilder(tokenValue) ?: return this.getNextToken()
+
+            if (token is NewLineToken) {
+                this.addLineNum()
+                // return this.getNextToken()
+            }
+            return token
         }
 
-        throw SyntaxException("Unexpected token: [${this.text[this.cursor]}]")
+        throw SyntaxException("Unexpected token: \n${input.substring(0, input.indexOf("\r\n"))} -> line/column: ${this.lineNum}/${this.columnNum}")
+    }
+
+    private fun addLineNum() {
+        this.lineNum += 1
+        this.columnNum = 1
     }
 
 
-}
-
-fun main() {
-    NdsTokenizer().apply {
-        init("user_info")
-
-        var token = getNextToken()
-        while (token != null) {
-            println(token)
-
-            token = getNextToken()
-        }
-    }
 }

@@ -56,7 +56,9 @@ class NdsParser(
      */
     private fun namespaceStatement(): NamespaceStatement {
         this.consume(NamespaceToken::class)
+
         return NamespaceStatement(this.namespaceIdentifier(false))
+            .also { this.effortConsumption() }
     }
 
     /**
@@ -99,9 +101,10 @@ class NdsParser(
         if (entity) this.consume(EntityToken::class)
 
         return ImportStatement(
-            this.namespaceIdentifier(),
+            namespaceIdentifier(),
             entity
         )
+            .also { this.effortConsumption() }
     }
 
     /**
@@ -114,6 +117,9 @@ class NdsParser(
         val funStatementList = mutableListOf<ASTree>()
         while (this.lookahead != null) {
             funStatementList.add(this.funStatement())
+            if (this.test(NewLineToken::class)) {
+                this.effortConsumption()
+            }
         }
 
         return funStatementList
@@ -127,7 +133,7 @@ class NdsParser(
     private fun funStatement(): ASTree {
         return when (this.lookahead) {
             is SearchToken -> this.searchFunDeclaration()
-            else -> EmptyStatement
+            else -> throw SyntaxException("未知Token(funStatement): [${this.lookahead}]")
         }
     }
 
@@ -248,6 +254,7 @@ class NdsParser(
      */
     private fun searchFunBlockStatement(): SearchFunBlockStatement {
         this.consume(OpenCurlyBracketToken::class)
+        this.effortConsumption()
         val body = this.searchFunStatementList()
         this.consume(ClosedCurlyBracketToken::class)
 
@@ -270,14 +277,11 @@ class NdsParser(
 
             if (searchStatement is SqlLiteral) {
                 sqlLiteralList.add(searchStatement)
-            } else {
-                if (sqlLiteralList.isNotEmpty()) {
-                    val compressedSql = sqlLiteralList.joinToString(" ") { it.value }
-                    sqlLiteralList.clear()
-                    list.add(SqlLiteral(compressedSql))
-                }
-                list.add(searchStatement)
+                continue
             }
+
+
+            list.add(searchStatement)
         }
 
         return list
@@ -286,15 +290,17 @@ class NdsParser(
     /**
      * SearchStatement
      *  : SqlLiteral
-     *  | Members
+     *  | CallMemberExpression
      *  ;
      */
     private fun searchStatement(): ASTree {
         return when (this.lookahead) {
             is ColonToken -> this.callMemberExpression()
+            is NewLineToken -> this.newLineLiteral()
             else -> this.sqlLiteral()
         }
     }
+
 
     /**
      * CallMemberExpression
@@ -304,11 +310,84 @@ class NdsParser(
      */
     private fun callMemberExpression(): ASTree {
         val members = this.members()
-        if (!this.test(DoubleColonToken::class)) {
-            return members
+        if (this.test(DoubleColonToken::class) || this.test(QuestionMarkPointToken::class)) {
+            return this.callExpression(members)
         }
 
-        return this.callExpression(members)
+        return members
+    }
+
+    /**
+     * 属性调用函数
+     *
+     * CallExpression
+     *  : '::' Identifier OptArguments
+     *  ;
+     */
+    private fun callExpression(callee: MemberExpression): CallExpression {
+        this.consume(DoubleColonToken::class)
+
+        val funName = this.identifier().value
+
+        return CallExpression(
+            callee,
+            funName,
+            this.optArguments()
+        )
+    }
+
+    /**
+     * 可选参数以及括号
+     *
+     * OptArguments
+     *  : '(' OptArgumentList ')'
+     *  ;
+     */
+    private fun optArguments(): List<ASTree> {
+        if (this.test(OpenParenthesisToken::class)) {
+
+            this.consume(OpenParenthesisToken::class)
+            // OptArgumentList
+            val optArgumentList = if (this.test(ClosedParenthesisToken::class)) emptyList() else this.argumentList()
+            this.consume(ClosedParenthesisToken::class)
+
+            return optArgumentList
+        }
+
+        return emptyList()
+    }
+
+    /**
+     * 函数参数列表
+     *
+     * ArgumentList
+     *  : Argument
+     *  | ArgumentList ',' Argument
+     *  ;
+     */
+    private fun argumentList(): List<ASTree> {
+        val argumentList = mutableListOf<ASTree>()
+        argumentList.add(this.argument())
+
+        while (this.matchAndConsume(CommaToken::class) != null) {
+            argumentList.add(this.argument())
+        }
+
+        return argumentList
+    }
+
+    /**
+     * 函数参数
+     *
+     * Argument
+     *  : Identifier
+     *  ;
+     */
+    private fun argument(): ASTree {
+        return when (this.lookahead) {
+            is IdentifierToken -> this.identifier()
+            else -> throw SyntaxException("未知的参数类型(Argument) -> ${this.lookahead?.javaClass?.simpleName}")
+        }
     }
 
     /**
@@ -345,70 +424,6 @@ class NdsParser(
     }
 
     /**
-     * CallExpression
-     *  : '::' Identifier OptArguments
-     *  ;
-     */
-    private fun callExpression(callee: MemberExpression): CallExpression {
-        this.consume(DoubleColonToken::class)
-        val funName = this.identifier().value
-
-        return CallExpression(
-            callee,
-            funName,
-            this.optArguments()
-        )
-    }
-
-    /**
-     * OptArguments
-     *  : '(' OptArgumentList ')'
-     *  ;
-     */
-    private fun optArguments(): List<ASTree> {
-        if (this.test(OpenParenthesisToken::class)) {
-
-            this.consume(OpenParenthesisToken::class)
-            // OptArgumentList
-            val optArgumentList = if (this.test(ClosedParenthesisToken::class)) emptyList() else this.argumentList()
-            this.consume(ClosedParenthesisToken::class)
-
-            return optArgumentList
-        }
-
-        return emptyList()
-    }
-
-    /**
-     * ArgumentList
-     *  : Argument
-     *  | ArgumentList ',' Argument
-     *  ;
-     */
-    private fun argumentList(): List<ASTree> {
-        val argumentList = mutableListOf<ASTree>()
-        argumentList.add(this.argument())
-
-        while (this.matchAndConsume(CommaToken::class) != null) {
-            argumentList.add(this.argument())
-        }
-
-        return argumentList
-    }
-
-    /**
-     * Argument
-     *  : Identifier
-     *  ;
-     */
-    private fun argument(): ASTree {
-        return when (this.lookahead) {
-            is IdentifierToken -> this.identifier()
-            else -> throw SyntaxException("未知的参数类型(Argument) -> ${this.lookahead?.javaClass?.simpleName}")
-        }
-    }
-
-    /**
      * SqlLiteral
      *  : IDENTIFIER
      *  | '*'
@@ -419,7 +434,7 @@ class NdsParser(
      *  ;
      *
      */
-    private fun sqlLiteral(): ASTree {
+    private fun sqlLiteral(): SqlLiteral {
         val token = when (this.lookahead) {
             is IdentifierToken -> this.consume(IdentifierToken::class)
             is StartToken -> this.consume(StartToken::class)
@@ -460,9 +475,28 @@ class NdsParser(
         return namespaceList.toString()
     }
 
+    private fun newLineLiteral(): NewLineLiteral {
+        this.consume(NewLineToken::class)
+        return NewLineLiteral
+    }
+
+    /**
+     * Identifier
+     *  : IDENTIFIER
+     *  ;
+     */
     private fun identifier(): Identifier {
         val token = this.consume(IdentifierToken::class)
         return Identifier(token.value)
+    }
+
+    /**
+     * 消费掉换行符
+     */
+    private fun effortConsumption() {
+//        while (this.lookahead is NewLineToken) {
+//            this.lookahead = this.ndsTokenizer.getNextToken()
+//        }
     }
 
     private fun <T : Token<*>> matchAndConsume(tokenType: KClass<T>): T? {
@@ -485,7 +519,7 @@ class NdsParser(
             ?: throw SyntaxException("Unexpected end of input, expected: ${tokenType.simpleName}")
 
         if (!tokenType.isInstance(token)) {
-            throw SyntaxException("Unexpected token: [${token.value}] -> ${token.javaClass.simpleName}, expected: ${tokenType.simpleName}")
+            throw SyntaxException("Unexpected token: [${token}] -> ${token.javaClass.simpleName}, expected: ${tokenType.simpleName}")
         }
 
         this.lookahead = this.ndsTokenizer.getNextToken()

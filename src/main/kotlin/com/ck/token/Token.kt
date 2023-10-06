@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonValue
  * @author 陈坤
  * 2023/10/2
  */
-interface Token<T> {
+interface Token<out T> {
 
     @get:JsonValue
     val value: T

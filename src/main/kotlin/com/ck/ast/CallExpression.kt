@@ -21,5 +21,5 @@ data class CallExpression(
     /**
      * 方法参数
      */
-    val arguments: List<ASTree>
+    val arguments: List<ASTree>,
 ) : ASTree
