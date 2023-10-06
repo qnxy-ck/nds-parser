@@ -22,4 +22,6 @@ data class CallExpression(
      * 方法参数
      */
     val arguments: List<ASTree>,
+
+    val ifCall: Boolean
 ) : ASTree

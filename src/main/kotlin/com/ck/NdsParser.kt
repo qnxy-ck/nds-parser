@@ -5,6 +5,7 @@ import com.ck.token.IdentifierToken
 import com.ck.token.Token
 import com.ck.token.keyword.*
 import com.ck.token.symbol.*
+import java.util.*
 import kotlin.reflect.KClass
 
 /**
@@ -16,12 +17,11 @@ class NdsParser(
 ) {
 
     private val ndsTokenizer = NdsTokenizer()
-    private var lookahead: Token<*>? = null
-
+    private val tokens = LinkedList<Token<*>>()
 
     fun parse(): Program {
         this.ndsTokenizer.init(this.text)
-        this.lookahead = this.ndsTokenizer.getNextToken()
+        this.tokens.offer(this.ndsTokenizer.getNextToken())
 
         return this.program()
     }
@@ -58,7 +58,7 @@ class NdsParser(
         this.consume(NamespaceToken::class)
 
         return NamespaceStatement(this.namespaceIdentifier(false))
-            .also { this.effortConsumption() }
+            .also { this.ignoreNewLines() }
     }
 
     /**
@@ -104,7 +104,7 @@ class NdsParser(
             namespaceIdentifier(),
             entity
         )
-            .also { this.effortConsumption() }
+            .also { this.ignoreNewLines() }
     }
 
     /**
@@ -115,10 +115,10 @@ class NdsParser(
      */
     private fun funStatementList(): List<ASTree> {
         val funStatementList = mutableListOf<ASTree>()
-        while (this.lookahead != null) {
+        while (this.lookahead() != null) {
             funStatementList.add(this.funStatement())
             if (this.test(NewLineToken::class)) {
-                this.effortConsumption()
+                this.ignoreNewLines()
             }
         }
 
@@ -131,9 +131,9 @@ class NdsParser(
      *  ;
      */
     private fun funStatement(): ASTree {
-        return when (this.lookahead) {
+        return when (this.lookahead()) {
             is SearchToken -> this.searchFunDeclaration()
-            else -> throw SyntaxException("未知Token(funStatement): [${this.lookahead}]")
+            else -> throw SyntaxException("未知Token(funStatement): [${this.lookahead()}]")
         }
     }
 
@@ -254,7 +254,7 @@ class NdsParser(
      */
     private fun searchFunBlockStatement(): SearchFunBlockStatement {
         this.consume(OpenCurlyBracketToken::class)
-        this.effortConsumption()
+        this.ignoreNewLines()
         val body = this.searchFunStatementList()
         this.consume(ClosedCurlyBracketToken::class)
 
@@ -270,17 +270,8 @@ class NdsParser(
     private fun searchFunStatementList(): List<ASTree> {
         val list = mutableListOf<ASTree>()
 
-        val sqlLiteralList = mutableListOf<SqlLiteral>()
-
-        while (!this.test(ClosedCurlyBracketToken::class)) {
+        while (this.lookahead() != null && !this.test(ClosedCurlyBracketToken::class)) {
             val searchStatement = this.searchStatement()
-
-            if (searchStatement is SqlLiteral) {
-                sqlLiteralList.add(searchStatement)
-                continue
-            }
-
-
             list.add(searchStatement)
         }
 
@@ -289,16 +280,41 @@ class NdsParser(
 
     /**
      * SearchStatement
-     *  : SqlLiteral
-     *  | CallMemberExpression
+     *  : CallMemberExpression
+     *  | IfStatement
      *  ;
      */
     private fun searchStatement(): ASTree {
-        return when (this.lookahead) {
+        return when (this.lookahead()) {
             is ColonToken -> this.callMemberExpression()
-            is NewLineToken -> this.newLineLiteral()
-            else -> this.sqlLiteral()
+            else -> this.ifStatement()
         }
+    }
+
+    /**
+     * IfStatement
+     *  : ZipSqlLiteral
+     *  | ZipSqlLiteral CallMemberExpression
+     *  ;
+     */
+    private fun ifStatement(): ASTree {
+        val zipSqlLiteral = this.zipSqlLiteral()
+
+        if (this.test(NewLineToken::class)) {
+            this.ignoreNewLines()
+            return zipSqlLiteral
+        }
+
+        // 直至匹配到 '?.'
+        if (!this.match(QuestionMarkPointToken::class, NewLineToken::class)) {
+            return zipSqlLiteral
+        }
+
+
+        val callMemberExpression = this.callMemberExpression()
+
+        return IfStatement(callMemberExpression, zipSqlLiteral)
+
     }
 
 
@@ -322,17 +338,34 @@ class NdsParser(
      *
      * CallExpression
      *  : '::' Identifier OptArguments
+     *  | '?.' Identifier OptArguments NEW_LINE
      *  ;
      */
     private fun callExpression(callee: MemberExpression): CallExpression {
-        this.consume(DoubleColonToken::class)
+
+        val ifCall = if (this.test(DoubleColonToken::class)) {
+            this.consume(DoubleColonToken::class)
+            false
+        } else {
+            this.consume(QuestionMarkPointToken::class)
+            true
+        }
+
 
         val funName = this.identifier().value
+        val argumentList = this.optArguments()
+
+        // newLine
+        if (ifCall) this.consume(NewLineToken::class)
+
+        // 忽略潜在的更多换行
+        this.ignoreNewLines()
 
         return CallExpression(
             callee,
             funName,
-            this.optArguments()
+            argumentList,
+            ifCall
         )
     }
 
@@ -384,9 +417,9 @@ class NdsParser(
      *  ;
      */
     private fun argument(): ASTree {
-        return when (this.lookahead) {
+        return when (this.lookahead()) {
             is IdentifierToken -> this.identifier()
-            else -> throw SyntaxException("未知的参数类型(Argument) -> ${this.lookahead?.javaClass?.simpleName}")
+            else -> throw SyntaxException("未知的参数类型(Argument) -> ${this.lookahead()?.javaClass?.simpleName}")
         }
     }
 
@@ -423,31 +456,16 @@ class NdsParser(
         return MemberExpression(member, null)
     }
 
-    /**
-     * SqlLiteral
-     *  : IDENTIFIER
-     *  | '*'
-     *  | '='
-     *  | '('
-     *  | ')'
-     *  | ','
-     *  ;
-     *
-     */
-    private fun sqlLiteral(): SqlLiteral {
-        val token = when (this.lookahead) {
-            is IdentifierToken -> this.consume(IdentifierToken::class)
-            is StartToken -> this.consume(StartToken::class)
-            is SimpleAssignToken -> this.consume(SimpleAssignToken::class)
-            is OpenParenthesisToken -> this.consume(OpenParenthesisToken::class)
-            is ClosedParenthesisToken -> this.consume(ClosedParenthesisToken::class)
-            is CommaToken -> this.consume(CommaToken::class)
-            else -> throw SyntaxException("未知sql类型: ${this.lookahead?.javaClass?.simpleName}")
+    private fun zipSqlLiteral(): SqlLiteral {
+        val list = mutableListOf<Token<*>>()
+
+        while (!(this.test(ColonToken::class) || this.test(NewLineToken::class))) {
+            list.add(this.consume(Token::class))
         }
 
-        return SqlLiteral(token.value)
+        val sql = list.joinToString(" ", postfix = " ") { it.value.toString() }
+        return SqlLiteral(sql)
     }
-
 
     /**
      * 命名空间标识符
@@ -475,11 +493,6 @@ class NdsParser(
         return namespaceList.toString()
     }
 
-    private fun newLineLiteral(): NewLineLiteral {
-        this.consume(NewLineToken::class)
-        return NewLineLiteral
-    }
-
     /**
      * Identifier
      *  : IDENTIFIER
@@ -491,38 +504,71 @@ class NdsParser(
     }
 
     /**
-     * 消费掉换行符
+     * 尽可能消费掉换行符
      */
-    private fun effortConsumption() {
-//        while (this.lookahead is NewLineToken) {
-//            this.lookahead = this.ndsTokenizer.getNextToken()
-//        }
-    }
-
-    private fun <T : Token<*>> matchAndConsume(tokenType: KClass<T>): T? {
-        val token = this.lookahead
-
-        return if (tokenType.isInstance(token)) {
-            this.lookahead = this.ndsTokenizer.getNextToken()
-
-            @Suppress("UNCHECKED_CAST")
-            token as T?
-        } else {
-            null
+    private fun ignoreNewLines() {
+        while (this.lookahead() is NewLineToken) {
+            this.consume(NewLineToken::class)
         }
     }
 
-    private fun <T : Token<*>> test(tokenType: KClass<T>) = tokenType.isInstance(this.lookahead)
+    /**
+     * 匹配一个token, 如果匹配成功则直接消费
+     * 匹配失败返回null
+     */
+    private fun <T : Token<*>> matchAndConsume(tokenType: KClass<T>): T? {
+        return if (tokenType.isInstance(this.lookahead())) this.consume(tokenType) else null
+    }
 
+    /**
+     * lookahead
+     */
+    private fun lookahead(): Token<*>? {
+        return this.tokens.peek()
+    }
+
+    /**
+     * 匹配当前 lookahead token是否与之匹配
+     *
+     * @param tokenType 待匹配的类型
+     * @return boolean true(匹配成功)
+     */
+    private fun <T : Token<*>> test(tokenType: KClass<T>) = tokenType.isInstance(this.lookahead())
+
+    /**
+     * 匹配token, 直至匹配到 tokenType 类型 或者匹配到 stopToken 类型为止
+     *
+     * @param tokenType 待匹配的类型
+     * @param stopToken 匹配到该token后没有找到 tokenType 类型则返回匹配失败
+     * @return boolean true(匹配成功)
+     */
+    private fun <T : Token<*>> match(tokenType: KClass<T>, stopToken: KClass<*>): Boolean {
+        var token = this.lookahead()
+
+        while (true) {
+            if (tokenType.isInstance(token)) {
+                return true
+            }
+
+            token = this.ndsTokenizer.getNextToken() ?: throw SyntaxException("Unexpected end of input, expected: ${tokenType.simpleName}")
+            this.tokens.offer(token)
+            if (stopToken.isInstance(token)) {
+                return false
+            }
+        }
+    }
+
+    /**
+     * 消费一个Token
+     */
     private fun <T : Token<*>> consume(tokenType: KClass<T>): T {
-        val token = this.lookahead
-            ?: throw SyntaxException("Unexpected end of input, expected: ${tokenType.simpleName}")
+        val token = this.tokens.poll() ?: throw SyntaxException("Unexpected end of input, expected: ${tokenType.simpleName}")
 
         if (!tokenType.isInstance(token)) {
-            throw SyntaxException("Unexpected token: [${token}] -> ${token.javaClass.simpleName}, expected: ${tokenType.simpleName}")
+            throw SyntaxException("Unexpected token: [${token.value}] -> ${token.javaClass.simpleName}, expected: ${tokenType.simpleName}")
         }
 
-        this.lookahead = this.ndsTokenizer.getNextToken()
+        this.tokens.offer(this.ndsTokenizer.getNextToken())
 
         @Suppress("UNCHECKED_CAST")
         return token as T

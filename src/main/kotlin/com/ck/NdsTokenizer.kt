@@ -16,14 +16,14 @@ class NdsTokenizer {
 
             // --------------------------------------------------------------
             // 匹配换行
-//            "\\n".toRegex() to { NewLineToken },
-//            "\\r\\n".toRegex() to { NewLineToken },
+            "\\n".toRegex() to { NewLineToken },
+            "\\r\\n".toRegex() to { NewLineToken },
 
 
             // --------------------------------------------------------------
             // 跳过空白符
-            """^\s+""".toRegex() to { null },
-//            """[ \t]+""".toRegex() to { null },
+//            """^\s+""".toRegex() to { null },
+            """[ \t]+""".toRegex() to { null },
 
             // 跳过单行注释
             "^//.*".toRegex() to { null },
