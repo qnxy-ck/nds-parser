@@ -3,6 +3,7 @@ package com.ck
 import com.ck.token.IdentifierToken
 import com.ck.token.Token
 import com.ck.token.keyword.*
+import com.ck.token.literal.StringLiteralToken
 import com.ck.token.symbol.*
 
 /**
@@ -40,6 +41,10 @@ class NdsTokenizer {
             "^\\bsearch \\b".toRegex() to { SearchToken },
             "^\\bmul \\b".toRegex() to { MulToken },
 
+            "^\\btrue\\b".toRegex() to { TrueToken },
+            "^\\bfalse\\b".toRegex() to { FalseToken },
+            
+
             // --------------------------------------------------------------
             // 标识符
             "^\\w+".toRegex() to { IdentifierToken(it) },
@@ -61,8 +66,11 @@ class NdsTokenizer {
 
             "^=".toRegex() to { SimpleAssignToken },
 
+            // --------------------------------------------------------------
+            // 字符串
+            "^\"[^\"]*\"".toRegex() to { StringLiteralToken(it) }
 
-            )
+        )
     }
 
 
