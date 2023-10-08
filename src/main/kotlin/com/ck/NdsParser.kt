@@ -392,8 +392,8 @@ class NdsParser(
      * x != y
      *
      * EqualityExpression
-     *  : EqualityLeftHandSideExpression
-     *  | EqualityExpression EQUALITY_OPERATOR EqualityLeftHandSideExpression
+     *  : RelationalExpression
+     *  | EqualityExpression EQUALITY_OPERATOR RelationalExpression
      *  ;
      */
     private fun equalityExpression() = this.logicalExpression(EqualityOperatorToken::class) { this.relationalExpression() }
@@ -411,7 +411,6 @@ class NdsParser(
      *  ;
      */
     private fun relationalExpression() = this.binaryExpression(RelationalOperatorToken::class) { this.additiveExpression() }
-
 
     /**
      * 加减
@@ -483,7 +482,9 @@ class NdsParser(
      *  : CallMemberExpression -> '::' 方式
      *  | NumberLiteral
      *  | StringLiteral
+     *  | BooleanLiteral
      *  | NullLiteral
+     *  | ParenthesizedExpression
      *  ;
      */
     private fun leftHandSideExpression(): ASTree {
