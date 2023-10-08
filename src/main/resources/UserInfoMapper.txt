@@ -1,5 +1,9 @@
 namespace com.demo.mapper
+
 import entity com.demo.data.entity.UserInfo
-search selectByUsername() {
-       = :username::test(1, true, "ss")
+
+search selectByUsername(username: String): mul {
+    select * from user_info
+        where username = :username -> !true
 }
+

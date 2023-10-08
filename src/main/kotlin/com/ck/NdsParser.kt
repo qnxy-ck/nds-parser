@@ -345,8 +345,6 @@ class NdsParser(
         this.consume(ArrowToken::class)
         val test = this.booleanExpression()
 
-        if (test !is LogicalExpression && test !is CallExpression) throw SyntaxException("非法表达式: $test")
-
         return ArrowIfStatement(
             member,
             test,
@@ -423,21 +421,17 @@ class NdsParser(
      *  | AdditiveExpression ADDITIVE_OPERATOR MultiplicativeExpression
      *  ;
      */
-    private fun additiveExpression() = this.binaryExpression(AdditiveOperatorToken::class) {
-        this.multiplicativeExpression()
-    }
+    private fun additiveExpression() = this.binaryExpression(AdditiveOperatorToken::class) { this.multiplicativeExpression() }
 
     /**
      * 乘除
      *
      * MultiplicativeExpression
-     *  : LeftHandSideExpression
-     *  | MultiplicativeExpression MULTIPLICATIVE_OPERATOR LeftHandSideExpression
+     *  : UnaryExpression
+     *  | MultiplicativeExpression MULTIPLICATIVE_OPERATOR UnaryExpression
      *  ;
      */
-    private fun multiplicativeExpression() = this.binaryExpression(MultiplicativeOperatorToken::class) {
-        this.leftHandSideExpression()
-    }
+    private fun multiplicativeExpression() = this.binaryExpression(MultiplicativeOperatorToken::class) { this.unaryExpression() }
 
     /**
      * 构建算数运算表达式
@@ -469,6 +463,19 @@ class NdsParser(
         }
 
         return left
+    }
+
+    /**
+     * UnaryExpression
+     *  : LeftHandSideExpression
+     *  | LOGICAL_NOT UnaryExpression
+     *  ;
+     */
+    private fun unaryExpression(): ASTree {
+        if (!this.test(LogicalNotToken::class)) return this.leftHandSideExpression()
+
+        val operator = this.consume(LogicalNotToken::class)
+        return UnaryExpression(operator, this.unaryExpression())
     }
 
     /**
