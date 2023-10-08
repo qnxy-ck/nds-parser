@@ -1,6 +1,7 @@
 package com.ck.token.symbol
 
-import com.ck.token.Token
+
+import com.ck.token.BinaryOperatorToken
 
 /**
  * 复杂赋值运算符
@@ -14,7 +15,7 @@ import com.ck.token.Token
  */
 enum class ComplexAssignToken(
     private val operator: String
-) : Token<String> {
+) : BinaryOperatorToken {
 
     MUL_ASSIGN("*="),
     DIV_ASSIGN("/="),

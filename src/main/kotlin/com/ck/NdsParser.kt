@@ -1,9 +1,17 @@
 package com.ck
 
 import com.ck.ast.*
+import com.ck.ast.literal.BooleanLiteral
+import com.ck.ast.literal.NullLiteral
+import com.ck.ast.literal.NumberLiteral
+import com.ck.ast.literal.StringLiteral
+import com.ck.token.BinaryOperatorToken
+import com.ck.token.BooleanToken
 import com.ck.token.IdentifierToken
 import com.ck.token.Token
 import com.ck.token.keyword.*
+import com.ck.token.literal.NumberLiteralToken
+import com.ck.token.literal.StringLiteralToken
 import com.ck.token.symbol.*
 import java.util.*
 import kotlin.reflect.KClass
@@ -273,6 +281,8 @@ class NdsParser(
         while (this.lookahead() != null && !this.test(ClosedCurlyBracketToken::class)) {
             val searchStatement = this.searchStatement()
             list.add(searchStatement)
+            this.ignoreNewLines()
+
         }
 
         return list
@@ -280,43 +290,210 @@ class NdsParser(
 
     /**
      * SearchStatement
-     *  : CallMemberExpression
-     *  | IfStatement
+     *  : SimpleIfStatement
+     *  | ArrowIfStatement
+     *  | CallMemberExpression
      *  ;
      */
     private fun searchStatement(): ASTree {
-        return when (this.lookahead()) {
-            is ColonToken -> this.callMemberExpression()
-            else -> this.ifStatement()
+        // ?.
+        if (this.match(QuestionMarkPointToken::class, NewLineToken::class)) {
+            return this.simpleIfStatement()
+        }
+
+        // -> 
+        if (this.match(ArrowToken::class, NewLineToken::class)) {
+            return this.arrowIfStatement()
+        }
+
+        // call
+        if (this.lookahead() is ColonToken) return this.callMemberExpression()
+
+        // sql
+        return this.zipSqlLiteral()
+    }
+
+    /**
+     * SimpleIfStatement
+     *  | ZipSqlLiteral CallMemberExpression
+     *  ;
+     */
+    private fun simpleIfStatement(): ASTree {
+        val consequent = this.zipSqlLiteral()
+        val test = this.callMemberExpression()
+
+        if (test is CallExpression && test.ifCall && consequent.value.isBlank()) {
+            throw SyntaxException("悬空的的IfExpression, 不存在被控制语句. 如: [空的 :username?.test() / 空的 -> :username::test()]")
+        }
+
+        return SimpleIfStatement(
+            test,
+            consequent
+        )
+    }
+
+    /**
+     * ArrowIfStatement
+     *  | ZipSqlLiteral Members '->' BooleanExpression
+     *  ;
+     */
+    private fun arrowIfStatement(): ASTree {
+        val consequent = this.zipSqlLiteral()
+        if (consequent.value.isBlank()) throw SyntaxException("悬空的的IfExpression, 不存在被控制语句. 如: [空的 :username?.test() / 空的 -> :username::test()]")
+
+        val member = this.members()
+        this.consume(ArrowToken::class)
+        val test = this.booleanExpression()
+
+        if (test !is LogicalExpression && test !is CallExpression) throw SyntaxException("非法表达式: $test")
+
+        return ArrowIfStatement(
+            member,
+            test,
+            consequent
+        ).also {
+            this.consume(NewLineToken::class)
+            this.ignoreNewLines()
         }
     }
 
     /**
-     * IfStatement
-     *  : ZipSqlLiteral
-     *  | ZipSqlLiteral CallMemberExpression
+     * BooleanExpression
+     *  : LogicalOrExpression
      *  ;
      */
-    private fun ifStatement(): ASTree {
-        val zipSqlLiteral = this.zipSqlLiteral()
-
-        if (this.test(NewLineToken::class)) {
-            this.ignoreNewLines()
-            return zipSqlLiteral
-        }
-
-        // 直至匹配到 '?.'
-        if (!this.match(QuestionMarkPointToken::class, NewLineToken::class)) {
-            return zipSqlLiteral
-        }
-
-
-        val callMemberExpression = this.callMemberExpression()
-
-        return IfStatement(callMemberExpression, zipSqlLiteral)
-
+    private fun booleanExpression(): ASTree {
+        return this.logicalOrExpression()
     }
 
+    /**
+     * Logical OR expression
+     * x || y
+     *
+     * LogicalOrExpression
+     *  : LogicalAndExpression
+     *  | LogicalOrExpression LOGICAL_OR LogicalAndExpression
+     *  ;
+     */
+    private fun logicalOrExpression() = this.logicalExpression(LogicalOrToken::class) { this.logicalAndExpression() }
+
+    /**
+     * Logical AND expression
+     * x && y
+     *
+     * LogicalAndExpression
+     *  : EqualityExpression
+     *  | LogicalAndExpression LOGICAL_AND EqualityExpression
+     *  ;
+     */
+    private fun logicalAndExpression() = this.logicalExpression(LogicalAndToken::class) { this.equalityExpression() }
+
+    /**
+     * EQUALITY_OPERATOR: ==, !=
+     * x == y
+     * x != y
+     *
+     * EqualityExpression
+     *  : EqualityLeftHandSideExpression
+     *  | EqualityExpression EQUALITY_OPERATOR EqualityLeftHandSideExpression
+     *  ;
+     */
+    private fun equalityExpression() = this.logicalExpression(EqualityOperatorToken::class) { this.relationalExpression() }
+
+    /**
+     * RELATIONAL_OPERATOR: >, >=, <, <=
+     * x > y
+     * x >= y
+     * x < y
+     * x <= y
+     *
+     * RelationalExpression
+     *  : AdditiveExpression
+     *  | RelationalExpression RELATIONAL_OPERATOR AdditiveExpression
+     *  ;
+     */
+    private fun relationalExpression() = this.binaryExpression(RelationalOperatorToken::class) { this.additiveExpression() }
+
+
+    /**
+     * 加减
+     *
+     * AdditiveExpression
+     *  : MultiplicativeExpression
+     *  | AdditiveExpression ADDITIVE_OPERATOR MultiplicativeExpression
+     *  ;
+     */
+    private fun additiveExpression() = this.binaryExpression(AdditiveOperatorToken::class) {
+        this.multiplicativeExpression()
+    }
+
+    /**
+     * 乘除
+     *
+     * MultiplicativeExpression
+     *  : LeftHandSideExpression
+     *  | MultiplicativeExpression MULTIPLICATIVE_OPERATOR LeftHandSideExpression
+     *  ;
+     */
+    private fun multiplicativeExpression() = this.binaryExpression(MultiplicativeOperatorToken::class) {
+        this.leftHandSideExpression()
+    }
+
+    /**
+     * 构建算数运算表达式
+     *
+     * @param operatorTokenType 运算符类型
+     * @param builderMethod 运算符左侧表达式
+     */
+    private inline fun binaryExpression(operatorTokenType: KClass<out BinaryOperatorToken>, builderMethod: () -> ASTree): ASTree {
+        var left = builderMethod()
+
+        while (this.test(operatorTokenType)) {
+            val operator = this.consume(operatorTokenType)
+            val right = builderMethod()
+
+            left = BinaryExpression(operator, left, right)
+        }
+
+        return left
+    }
+
+    private inline fun logicalExpression(operatorTokenType: KClass<out BinaryOperatorToken>, builderMethod: () -> ASTree): ASTree {
+        var left = builderMethod()
+
+        while (this.test(operatorTokenType)) {
+            val operator = this.consume(operatorTokenType)
+            val right = builderMethod()
+
+            left = LogicalExpression(operator, left, right)
+        }
+
+        return left
+    }
+
+    /**
+     * LeftHandSideExpression
+     *  : CallMemberExpression -> '::' 方式
+     *  | NumberLiteral
+     *  | StringLiteral
+     *  | NullLiteral
+     *  ;
+     */
+    private fun leftHandSideExpression(): ASTree {
+        return when (this.lookahead()) {
+            is ColonToken -> {
+                val expression = this.callMemberExpression()
+                if (expression is CallExpression && expression.ifCall) throw SyntaxException("仅可存在函数调用, 不可为条件控制语法.") else expression
+            }
+
+            is NumberLiteralToken -> this.numberLiteral()
+            is StringLiteralToken -> this.stringLiteral()
+            is BooleanToken -> this.booleanLiteral()
+            is NullToken -> this.nullLiteral()
+            is OpenParenthesisToken -> this.parenthesizedExpression()
+            else -> throw SyntaxException("Illegal left side expression.")
+        }
+    }
 
     /**
      * CallMemberExpression
@@ -356,10 +533,12 @@ class NdsParser(
         val argumentList = this.optArguments()
 
         // newLine
-        if (ifCall) this.consume(NewLineToken::class)
+        if (ifCall) {
+            this.consume(NewLineToken::class)
 
-        // 忽略潜在的更多换行
-        this.ignoreNewLines()
+            // 忽略潜在的更多换行
+            this.ignoreNewLines()
+        }
 
         return CallExpression(
             callee,
@@ -417,10 +596,7 @@ class NdsParser(
      *  ;
      */
     private fun argument(): ASTree {
-        return when (this.lookahead()) {
-            is IdentifierToken -> this.identifier()
-            else -> throw SyntaxException("未知的参数类型(Argument) -> ${this.lookahead()?.javaClass?.simpleName}")
-        }
+        return this.literal()
     }
 
     /**
@@ -456,14 +632,28 @@ class NdsParser(
         return MemberExpression(member, null)
     }
 
+    /**
+     * ParenthesizedExpression
+     *  : '(' BooleanExpression ')'
+     *  ;
+     */
+    private fun parenthesizedExpression(): ASTree {
+        this.consume(OpenParenthesisToken::class)
+        val expression = this.booleanExpression()
+        this.consume(ClosedParenthesisToken::class)
+
+        return expression
+    }
+
     private fun zipSqlLiteral(): SqlLiteral {
         val list = mutableListOf<Token<*>>()
 
-        while (!(this.test(ColonToken::class) || this.test(NewLineToken::class))) {
+        while (!(this.test(ColonToken::class) || this.test(ArrowToken::class) || this.test(NewLineToken::class))) {
             list.add(this.consume(Token::class))
         }
 
         val sql = list.joinToString(" ", postfix = " ") { it.value.toString() }
+
         return SqlLiteral(sql)
     }
 
@@ -482,8 +672,8 @@ class NdsParser(
 
             if (this.test(IdentifierToken::class)) {
                 namespaceList.append(this.identifier().value)
-            } else if (start && this.test(StartToken::class)) {
-                namespaceList.append(this.consume(StartToken::class).value)
+            } else if (start && this.test(MultiplicativeOperatorToken.MULTIPLICATION::class)) {
+                namespaceList.append(this.consume(MultiplicativeOperatorToken.MULTIPLICATION::class).value)
 
                 // 最后的星号如果匹配成功, 那么则需要结束匹配
                 break
@@ -491,6 +681,26 @@ class NdsParser(
         }
 
         return namespaceList.toString()
+    }
+
+    /**
+     * Literal
+     *  : Identifier
+     *  | BooleanLiteral
+     *  | StringLiteral
+     *  | NumberLiteral
+     *  | NullLiteral
+     *  ;
+     */
+    private fun literal(): ASTree {
+        return when (this.lookahead()) {
+            is IdentifierToken -> this.identifier()
+            is BooleanToken -> this.booleanLiteral()
+            is StringLiteralToken -> this.stringLiteral()
+            is NumberLiteralToken -> this.numberLiteral()
+            is NullToken -> this.nullLiteral()
+            else -> throw SyntaxException("Literal: unexpected literal production -> ${this.lookahead()}")
+        }
     }
 
     /**
@@ -502,6 +712,52 @@ class NdsParser(
         val token = this.consume(IdentifierToken::class)
         return Identifier(token.value)
     }
+
+    /**
+     * BooleanLiteral
+     *  : 'true'
+     *  | 'false'
+     *  ;
+     */
+    private fun booleanLiteral(): BooleanLiteral {
+        val token = this.consume(BooleanToken::class)
+        return BooleanLiteral(token.value)
+    }
+
+
+    /**
+     * NullLiteral
+     *  : 'null'
+     *  ;
+     */
+    private fun nullLiteral(): NullLiteral {
+        this.consume(NullToken::class)
+        return NullLiteral
+    }
+
+    /**
+     * StringLiteral
+     *  : STRING_LITERAL
+     *  ;
+     */
+    private fun stringLiteral(): StringLiteral {
+        val token = this.consume(StringLiteralToken::class)
+        return StringLiteral(token.value.substring(1, token.value.length - 1))
+    }
+
+    /**
+     * NumberLiteral
+     *  : NUMBER_LITERAL
+     *  ;
+     */
+    private fun numberLiteral(): NumberLiteral {
+        val token = this.consume(NumberLiteralToken::class)
+        return NumberLiteral(token.value, token.numberType)
+    }
+
+    /**
+     * ------------------------------------------------------------------------------------------------
+     */
 
     /**
      * 尽可能消费掉换行符
@@ -545,16 +801,19 @@ class NdsParser(
     private fun <T : Token<*>> match(tokenType: KClass<T>, stopToken: KClass<*>): Boolean {
         var token = this.lookahead()
 
-        while (true) {
-            if (tokenType.isInstance(token)) {
-                return true
-            }
+        // 优先判断已匹配过的token
+        this.tokens.forEach {
+            if (tokenType.isInstance(it)) return true
 
-            token = this.ndsTokenizer.getNextToken() ?: throw SyntaxException("Unexpected end of input, expected: ${tokenType.simpleName}")
+            if (stopToken.isInstance(it)) return false
+        }
+
+        while (true) {
+            if (tokenType.isInstance(token)) return true
+
+            token = this.ndsTokenizer.getNextToken() ?: return false
             this.tokens.offer(token)
-            if (stopToken.isInstance(token)) {
-                return false
-            }
+            if (stopToken.isInstance(token)) return false
         }
     }
 
@@ -568,7 +827,10 @@ class NdsParser(
             throw SyntaxException("Unexpected token: [${token.value}] -> ${token.javaClass.simpleName}, expected: ${tokenType.simpleName}")
         }
 
-        this.tokens.offer(this.ndsTokenizer.getNextToken())
+        val nextToken = this.ndsTokenizer.getNextToken()
+        if (nextToken != null) {
+            this.tokens.offer(nextToken)
+        }
 
         @Suppress("UNCHECKED_CAST")
         return token as T

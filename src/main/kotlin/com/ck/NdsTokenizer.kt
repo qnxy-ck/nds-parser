@@ -1,10 +1,10 @@
 package com.ck
 
 import com.ck.token.IdentifierToken
+import com.ck.token.NumberType
 import com.ck.token.Token
 import com.ck.token.keyword.*
-import com.ck.token.literal.NumberLiteral
-import com.ck.token.literal.NumberType
+import com.ck.token.literal.NumberLiteralToken
 import com.ck.token.literal.StringLiteralToken
 import com.ck.token.symbol.*
 import kotlin.enums.EnumEntries
@@ -48,8 +48,7 @@ class NdsTokenizer {
             "^\\{".toRegex() to { OpenCurlyBracketToken },
             "^}".toRegex() to { ClosedCurlyBracketToken },
             "^\\.".toRegex() to { DotToken },
-            "^\\*".toRegex() to { StartToken },
-            "^#".toRegex() to { PoundSignToken },
+            "^->".toRegex() to { ArrowToken },
 
 
             // --------------------------------------------------------------
@@ -58,7 +57,7 @@ class NdsTokenizer {
             "^\\bimport \\b".toRegex() to { ImportToken },
             "^\\bentity \\b".toRegex() to { EntityToken },
             "^\\bsearch \\b".toRegex() to { SearchToken },
-            "^\\bmul \\b".toRegex() to { MulToken },
+            "^\\bmul\\b".toRegex() to { MulToken },
 
             "^\\btrue\\b".toRegex() to { TrueToken },
             "^\\bfalse\\b".toRegex() to { FalseToken },
@@ -66,10 +65,10 @@ class NdsTokenizer {
 
             // --------------------------------------------------------------
             // 数字
-            "[-+]\\d+\\.\\d+F".toRegex() to { NumberLiteral(it, NumberType.FLOAT) },
-            "[-+]?\\d+\\.\\d+".toRegex() to { NumberLiteral(it, NumberType.DOUBLE) },
-            "^[-+]?\\d+L".toRegex() to { NumberLiteral(it, NumberType.LONG) },
-            "^[-+]?\\d+".toRegex() to { NumberLiteral(it, NumberType.INT) },
+            "[-+]\\d+\\.\\d+F".toRegex() to { NumberLiteralToken(it, NumberType.FLOAT) },
+            "[-+]?\\d+\\.\\d+".toRegex() to { NumberLiteralToken(it, NumberType.DOUBLE) },
+            "^[-+]?\\d+L".toRegex() to { NumberLiteralToken(it, NumberType.LONG) },
+            "^[-+]?\\d+".toRegex() to { NumberLiteralToken(it, NumberType.INT) },
 
             // --------------------------------------------------------------
             // 标识符

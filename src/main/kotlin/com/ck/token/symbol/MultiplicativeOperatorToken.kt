@@ -1,6 +1,6 @@
 package com.ck.token.symbol
 
-import com.ck.token.Token
+import com.ck.token.BinaryOperatorToken
 
 /**
  * 乘除法运算符
@@ -10,7 +10,7 @@ import com.ck.token.Token
  */
 enum class MultiplicativeOperatorToken(
     private val operator: String
-) : Token<String> {
+) : BinaryOperatorToken {
 
     MULTIPLICATION("*"),
     DIVISION("/"),

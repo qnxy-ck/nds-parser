@@ -1,6 +1,6 @@
 package com.ck.token.symbol
 
-import com.ck.token.Token
+import com.ck.token.BinaryOperatorToken
 
 /**
  * 关系运算符
@@ -14,7 +14,7 @@ import com.ck.token.Token
  */
 enum class RelationalOperatorToken(
     private val operator: String
-) : Token<String> {
+) : BinaryOperatorToken {
 
     LT("<"),
     LE("<="),

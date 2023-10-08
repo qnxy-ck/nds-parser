@@ -1,6 +1,6 @@
 package com.ck.token.symbol
 
-import com.ck.token.Token
+import com.ck.token.BinaryOperatorToken
 
 /**
  * 等式运算符
@@ -12,17 +12,11 @@ import com.ck.token.Token
  */
 enum class EqualityOperatorToken(
     private val operator: String
-) : Token<String> {
+) : BinaryOperatorToken {
 
     EQUALITY("=="),
     NOT_EQUALITY("!="),
     ;
-
-    companion object {
-//        fun assign(operator: String): EqualityOperatorToken {
-//            return if (operator == EQUALITY.operator) EQUALITY else NOT_EQUALITY
-//        }
-    }
 
     override val value: String
         get() = this.operator
